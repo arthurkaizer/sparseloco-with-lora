@@ -23,15 +23,17 @@ Aplicação do otimizador **SparseLoCo** — proposto no contexto de pré-treina
 
 O SparseLoCo foi proposto e validado exclusivamente para pré-treinamento com gradientes densos. Este trabalho explora uma aplicação nova: fine-tuning com LoRA, onde os parâmetros treináveis são ~590K em vez de bilhões. Avaliamos se a compressão Top-k com error feedback consegue manter a qualidade do treinamento nesse regime de baixa dimensionalidade.
 
-Comparamos duas abordagens no benchmark PubMedQA (domínio biomédico):
+Comparamos duas abordagens no benchmark MedMCQA (domínio biomédico):
 
 | Abordagem | Parâmetros treináveis | Comunicação |
 |---|---|---|
 | AdamW + LoRA (baseline) | LoRA adapters | centralizado, sem compressão |
 | SparseLoCo + LoRA | LoRA adapters | Top-k comprimido, distribuído simulado |
 
-**Modelo:** Covenant-72B com QLoRA 4-bit (fallback: meta-llama/Llama-3.2-3B para T4)  
-**Benchmark:** PubMedQA — Q&A biomédica (yes/no/maybe, 3 classes)  
+**Modelo de teste local:** TinyLlama-1.1B (CPU, FP32, sem quantização)  
+**Modelo de desenvolvimento:** Llama-3.2-3B com QLoRA 4-bit (Colab T4, requer login HF)  
+**Modelo final:** Covenant-72B com QLoRA 4-bit (requer A100 80GB)  
+**Benchmark:** MedMCQA — questões médicas de múltipla escolha (4 classes, chance=25%)  
 **Workers simulados:** R=4, executados em série na mesma máquina
 
 ---
@@ -71,7 +73,7 @@ jupyter notebook experimento.ipynb
 ## Limitações
 
 - O SparseLoCo é simulado localmente — workers rodam em série na mesma máquina, sem comunicação real pela rede
-- Covenant-72B exige ~36GB de VRAM mesmo com 4-bit quantization — em hardware limitado (T4/16GB) é necessário usar o fallback Llama-3.2-3B
+- Covenant-72B exige ~36GB de VRAM mesmo com 4-bit quantization — o desenvolvimento local usa TinyLlama-1.1B (CPU, FP32), o intermediário usa Llama-3.2-3B (Colab T4) e o experimento final roda no Colab A100
 - A motivação prática da combinação SparseLoCo+LoRA é limitada: LoRA resolve eficiência de memória (problema local) e SparseLoCo resolve eficiência de comunicação (problema distribuído) — são cenários distintos
 
 ---
