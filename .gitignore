@@ -1,0 +1,18 @@
+# Ambientes virtuais
+.venv/
+env/
+venv/*
+
+# Cache Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Cache HuggingFace
+~/.cache/huggingface/
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# PDFs dos artigos (grandes, não precisam de versionamento)
+*.pdf
