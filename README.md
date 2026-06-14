@@ -1,14 +1,14 @@
-# SparseLoCo + LoRA — Fine-tuning Distribuído Simulado
+# SparseLoCo + LoRA — Fine-tuning do Covenant-72B no MedQA
 
 Projeto Final do Seminário de Deep Learning.
 
-Aplicação do otimizador **SparseLoCo** — proposto no contexto de pré-treinamento distribuído de LLMs e utilizado no treinamento do Covenant-72B — ao cenário de **fine-tuning com LoRA**, avaliando se a compressão Top-k ainda é eficaz quando os gradientes já são de baixa dimensionalidade por natureza.
+Aplicação do otimizador **SparseLoCo** — proposto no contexto de pré-treinamento distribuído de LLMs e utilizado no treinamento do Covenant-72B — ao cenário de **fine-tuning com LoRA** no benchmark médico MedQA (USMLE).
 
 ---
 
 ## Pergunta de Pesquisa
 
-> O SparseLoCo aplicado ao espaço LoRA consegue resultados comparáveis ao baseline centralizado, mesmo descartando 90% dos pseudo-gradientes por round?
+> O SparseLoCo+LoRA atinge accuracy comparável ao LoRA centralizado no MedQA? Se sim, o SparseLoCo viabiliza fine-tuning distribuído sem degradar a qualidade do modelo.
 
 ---
 
@@ -21,20 +21,35 @@ Aplicação do otimizador **SparseLoCo** — proposto no contexto de pré-treina
 
 ## Abordagem
 
-O SparseLoCo foi proposto e validado exclusivamente para pré-treinamento com gradientes densos. Este trabalho explora uma aplicação nova: fine-tuning com LoRA, onde os parâmetros treináveis são ~590K em vez de bilhões. Avaliamos se a compressão Top-k com error feedback consegue manter a qualidade do treinamento nesse regime de baixa dimensionalidade.
+O SparseLoCo foi proposto e validado exclusivamente para pré-treinamento com gradientes densos. Este trabalho explora uma aplicação nova: fine-tuning com LoRA do Covenant-72B em um domínio específico (médico), avaliando se a compressão Top-k com error feedback mantém a qualidade comparável ao fine-tuning centralizado.
 
-Comparamos duas abordagens no benchmark MedMCQA (domínio biomédico):
+Comparamos duas abordagens no benchmark MedQA (USMLE):
 
 | Abordagem | Parâmetros treináveis | Comunicação |
 |---|---|---|
-| AdamW + LoRA (baseline) | LoRA adapters | centralizado, sem compressão |
-| SparseLoCo + LoRA | LoRA adapters | Top-k comprimido, distribuído simulado |
+| AdamW + LoRA (baseline) | ~103M (LoRA rank=8) | centralizado, sem compressão |
+| SparseLoCo + LoRA | ~103M (LoRA rank=8) | Top-k 10% comprimido, distribuído simulado |
 
-**Modelo de teste local:** TinyLlama-1.1B (CPU, FP32, sem quantização)  
-**Modelo de desenvolvimento:** Llama-3.2-3B com QLoRA 4-bit (Colab T4, requer login HF)  
-**Modelo final:** Covenant-72B com QLoRA 4-bit (requer A100 80GB)  
-**Benchmark:** MedMCQA — questões médicas de múltipla escolha (4 classes, chance=25%)  
+**Modelo:** Covenant-72B com QLoRA 4-bit NF4 (bfloat16)
+**Benchmark:** MedQA — questões médicas USMLE (A/B/C/D/E, chance=20%)
 **Workers simulados:** R=4, executados em série na mesma máquina
+**Hardware:** A100 80GB (recomendado)
+
+---
+
+## Configuração do Experimento
+
+| Parâmetro | Valor | Justificativa |
+|---|---|---|
+| `B` | 1 | Covenant-72B ocupa ~36GB, pouca VRAM restante |
+| `MAX_LEN` | 512 | Cobre a maioria das questões MedQA sem OOM |
+| `LORA_R` | 8 | EF buffers gerenciáveis (~1.6GB para 4 workers) |
+| `LR_INNER` | 1e-4 | Conservador para modelo de 72B |
+| `H` | 20 | Inner steps por round |
+| `T` | 10 | Outer rounds (~1h cada no A100) |
+| `TOPK_K` | 0.10 | 90% de compressão nos pseudo-gradientes |
+| `BETA` | 0.95 | Decay do error feedback |
+| `MAX_GRAD_NORM` | 1.0 | Gradient clipping para estabilidade |
 
 ---
 
@@ -42,7 +57,7 @@ Comparamos duas abordagens no benchmark MedMCQA (domínio biomédico):
 
 ```
 sparseloco-with-lora/
-└── experimento.ipynb    # notebook principal com todos os experimentos
+└── sparseloco-with-lora.ipynb    # notebook principal
 ```
 
 ---
@@ -52,29 +67,31 @@ sparseloco-with-lora/
 ### Dependências
 
 ```bash
-pip install torch transformers peft datasets matplotlib tqdm scikit-learn
+!pip install torch transformers peft datasets matplotlib tqdm scikit-learn bitsandbytes>=0.46.1 accelerate
 ```
+
+### Hardware necessário
+
+| Modelo | VRAM mínima |
+|---|---|
+| Covenant-72B (4-bit) | A100 80GB |
+| TinyLlama-1.1B (fallback) | T4 16GB |
 
 ### Executar
 
-```bash
-jupyter notebook experimento.ipynb
-```
+1. Abrir `sparseloco-with-lora.ipynb` no Google Colab com **A100 GPU**
+2. Montar o Google Drive (célula de config já faz isso automaticamente)
+3. Rodar todas as células em ordem
 
-### Tempo estimado
-
-| Hardware | Tempo |
-|---|---|
-| CPU | várias horas |
-| GPU (T4/RTX) | ~20–40 min |
+Os checkpoints são salvos automaticamente no Google Drive após cada round, permitindo retomar após desconexão.
 
 ---
 
 ## Limitações
 
 - O SparseLoCo é simulado localmente — workers rodam em série na mesma máquina, sem comunicação real pela rede
-- Covenant-72B exige ~36GB de VRAM mesmo com 4-bit quantization — o desenvolvimento local usa TinyLlama-1.1B (CPU, FP32), o intermediário usa Llama-3.2-3B (Colab T4) e o experimento final roda no Colab A100
-- A motivação prática da combinação SparseLoCo+LoRA é limitada: LoRA resolve eficiência de memória (problema local) e SparseLoCo resolve eficiência de comunicação (problema distribuído) — são cenários distintos
+- Com B=1 e T=10, o experimento é um subset do que seria ideal — limitação de tempo de GPU
+- A motivação prática combina SparseLoCo (eficiência de comunicação) com LoRA (eficiência de parâmetros) — cenários distintos, mas a combinação é inédita na literatura
 
 ---
 
@@ -84,4 +101,4 @@ jupyter notebook experimento.ipynb
 - Lidin et al. (2026). *Covenant-72B: Pre-Training a 72B LLM with Trustless Peers Over-the-Internet.*
 - Hu et al. (2022). *LoRA: Low-Rank Adaptation of Large Language Models.* arXiv:2106.09685
 - Douillard et al. (2023). *DiLoCo: Distributed Low-Communication Training of Language Models.*
-- Wang et al. (2019). *GLUE: A Multi-Task Benchmark and Analysis Platform for Natural Language Understanding.*
+- Jin et al. (2020). *What Disease does this Patient Have? A Large-scale Open Domain Question Answering Dataset from Medical Exams.* arXiv:2009.13081
