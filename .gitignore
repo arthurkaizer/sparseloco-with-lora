@@ -16,3 +16,5 @@ __pycache__/
 
 # PDFs dos artigos (grandes, não precisam de versionamento)
 *.pdf
+
+/apresentacao
